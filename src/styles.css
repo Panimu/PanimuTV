@@ -1338,10 +1338,10 @@ img.poster,
   .nav {
     inset: auto 0 0 0;
     width: 100%;
-    height: var(--nav-h);
+    height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
     flex-direction: row;
     align-items: stretch;
-    padding: 0;
+    padding: 0 0 env(safe-area-inset-bottom, 0px);
     border-right: none;
     border-top: 1px solid var(--border);
   }
@@ -1372,11 +1372,13 @@ img.poster,
 
   .main {
     margin-left: 0;
-    margin-bottom: var(--nav-h);
+    margin-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
   }
 
   .page {
     padding: 18px 14px 40px;
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
   }
 
   .show-head {
@@ -1407,7 +1409,7 @@ img.poster,
   }
 
   .toasts {
-    bottom: calc(var(--nav-h) + 12px);
+    bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px);
     width: calc(100% - 24px);
   }
 

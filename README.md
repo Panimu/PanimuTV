@@ -46,9 +46,31 @@ Built with Vite + React + TypeScript. Dark, poster-forward UI.
 - API response cache with size display and one-click clear.
 - Full reset. Everything namespaced under `panimu.*` in localStorage.
 
-Also: installable PWA manifest with icons, responsive layout (sidebar on
-desktop, bottom tab bar on mobile), offline-tolerant — cached data keeps
-working when TheTVDB is unreachable.
+Also: installable PWA (service worker precaches the app shell, artwork is
+cached offline, updates apply automatically), responsive layout (sidebar on
+desktop, bottom tab bar on mobile, iPhone safe-area aware), offline-tolerant —
+cached data keeps working when TheTVDB is unreachable.
+
+## Hosted app
+
+The app deploys to GitHub Pages on every push to the default branch:
+
+**https://panimu.github.io/PanimuTV/**
+
+`.github/workflows/deploy.yml` builds `dist/` and publishes it; the
+`configure-pages` step auto-enables Pages on first run. Because all state is
+in localStorage, the hosted app is still 100% private to your browser.
+
+### Install on iPhone/iPad (PWA)
+
+1. Open the URL above in **Safari**.
+2. Share → **Add to Home Screen**.
+3. It launches full-screen with its own icon, works offline for everything
+   already cached, and keeps your library in the app's local storage.
+
+> localStorage for a home-screen web app is persistent, but iOS can evict it
+> if the app is unused for weeks and the device is low on space — use
+> **Profile → Export backup** regularly.
 
 ## Getting started
 
@@ -113,6 +135,32 @@ src/
 ```
 
 The pure logic in `src/lib` is unit-tested (`npm test`).
+
+## Path to a native iOS app
+
+The codebase is deliberately Capacitor-ready: a fully static `dist/`, hash
+routing (no server rewrites), relative asset paths, and an API client that
+talks to TheTVDB directly over CORS (which also works from a
+`capacitor://localhost` WebView origin). When you want a real App Store /
+sideloaded build, on a Mac with Xcode:
+
+```bash
+npm i @capacitor/core @capacitor/cli @capacitor/ios
+npx cap init PanimuTV com.panimu.tv --web-dir dist
+npm run build && npx cap add ios && npx cap sync
+npx cap open ios     # build & run from Xcode
+```
+
+Notes for that step:
+
+- The existing icons (`public/icons/`, `apple-touch-icon.png`) can seed the
+  Xcode asset catalog.
+- Data migration is trivial: WKWebView keeps its own localStorage, so export
+  a backup from the web app and import it in the native one.
+- Longer-term, swapping `localStorage` persistence for Capacitor
+  `Preferences`/`Filesystem` would remove eviction risk entirely — the
+  storage layer is isolated in `src/store/*` and `src/api/cache.ts`, so it's
+  a contained change.
 
 ## Credits
 

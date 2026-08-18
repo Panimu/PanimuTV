@@ -1,10 +1,13 @@
-# Deploys the built app to GitHub Pages.
-# Enable Pages for this repo (Settings → Pages → Source: GitHub Actions) first.
+# Deploys the built app to GitHub Pages: https://panimu.github.io/PanimuTV/
+# The configure-pages step auto-enables Pages (Source: GitHub Actions) on
+# first run; no manual repo-settings step needed.
 name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - claude/tvtime-local-storage-app-f8gujj
   workflow_dispatch:
 
 permissions:
@@ -21,6 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
