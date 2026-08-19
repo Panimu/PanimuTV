@@ -67,7 +67,7 @@ export function TvTimeImport() {
       setResult(res)
       setStage('done')
       toast(
-        `Imported ${res.showsAdded} show${res.showsAdded === 1 ? '' : 's'} · ${res.episodesMarked} episodes`,
+        `Imported ${res.showsAdded} show${res.showsAdded === 1 ? '' : 's'} · ${res.episodesMarked} episode${res.episodesMarked === 1 ? '' : 's'}`,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildImportPlan, classifyHeaders } from './tvtime'
+import { buildImportPlan, classifyHeaders, normalizeTitle } from './tvtime'
 
 const SEEN = `episode_id,tv_show_id,tv_show_name,season_number,episode_number,updated_at
 1001,81189,Breaking Bad,1,1,2024-03-01 20:14:00
@@ -31,6 +31,27 @@ describe('classifyHeaders', () => {
 
   it('ignores unrecognized files', () => {
     expect(classifyHeaders(['foo', 'bar'], 'notes.csv')).toBe('ignored')
+  })
+})
+
+describe('classifyHeaders entity records', () => {
+  it('accepts entity_id only alongside entity_type', () => {
+    expect(classifyHeaders(['entity_type', 'entity_id'], 'tracking.csv')).toBe('shows')
+    expect(classifyHeaders(['entity_id', 'created_at'], 'tracking.csv')).toBe('ignored')
+  })
+
+  it('does not classify profile files with a bare name column as shows', () => {
+    expect(classifyHeaders(['id', 'name', 'email'], 'user.csv')).toBe('ignored')
+  })
+})
+
+describe('normalizeTitle', () => {
+  it('folds case, punctuation, diacritics and ampersands', () => {
+    expect(normalizeTitle('Marvel’s Agents of S.H.I.E.L.D.')).toBe(
+      normalizeTitle('marvels agents of shield'),
+    )
+    expect(normalizeTitle('Café & Croissant')).toBe('cafeandcroissant')
+    expect(normalizeTitle('Law & Order')).toBe(normalizeTitle('Law and Order'))
   })
 })
 
@@ -91,6 +112,44 @@ describe('buildImportPlan', () => {
     expect(plan.files.find((f) => f.name === 'movie_seen.csv')?.kind).toBe('movies')
     expect(plan.warnings.join(' ')).toMatch(/movie file/i)
     expect(plan.warnings.join(' ')).toMatch(/No shows found/i)
+  })
+
+  it('ignores profile-style files with a bare name column', () => {
+    const plan = buildImportPlan([
+      { name: 'user.csv', text: 'id,name,email\n1,panimu,panimu@example.com\n' },
+    ])
+    expect(plan.shows).toEqual([])
+  })
+
+  it('uses entity_id as a show id only for series rows', () => {
+    const tracking = `entity_type,entity_id,created_at
+series,81189,2024-01-01 10:00:00
+episode,999999,2024-01-02 10:00:00
+follow,777,2024-01-03 10:00:00
+show,305288,2024-01-04 10:00:00
+`
+    const plan = buildImportPlan([{ name: 'tracking-prod-records.csv', text: tracking }])
+    expect(plan.shows.map((s) => s.sourceId!).sort((a, b) => a - b)).toEqual([81189, 305288])
+  })
+
+  it('folds a name-only bucket into the id bucket with the same title', () => {
+    const seen = `tv_show_id,tv_show_name,season_number,episode_number
+81189,Breaking Bad,1,1
+`
+    const followsByName = `show_name
+BREAKING BAD
+The Leftovers
+`
+    const plan = buildImportPlan([
+      { name: 'seen.csv', text: seen },
+      { name: 'follows.csv', text: followsByName },
+    ])
+    expect(plan.shows).toHaveLength(2)
+    const bb = plan.shows.find((s) => s.sourceId === 81189)!
+    expect(bb.followOnly).toBe(false)
+    expect(
+      plan.shows.filter((s) => normalizeTitle(s.name ?? '') === normalizeTitle('Breaking Bad')),
+    ).toHaveLength(1)
   })
 
   it('falls back to name-only grouping when no id column exists', () => {

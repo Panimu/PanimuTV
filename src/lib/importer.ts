@@ -6,12 +6,13 @@
 // the export's episode id as a secondary match.
 
 import { fetchEpisodes, getSeriesExtended, searchSeries } from '../api/tvdb'
+import type { SearchResult } from '../api/types'
 import { useLibrary } from '../store/library'
 import { todayISO } from './dates'
 import { hasAired, isRegular } from './episodes'
 import { applyExtended } from './actions'
 import { pooled } from './pool'
-import type { ImportPlan, ImportShow } from './tvtime'
+import { normalizeTitle, type ImportPlan, type ImportShow } from './tvtime'
 import type { Ep, TrackedShow, UserStatus } from '../types'
 
 export interface ImportProgress {
@@ -49,6 +50,32 @@ function inferStatus(
   return 'watching'
 }
 
+/**
+ * Choose a search result for a title, or null if none is trustworthy.
+ * An exact normalized-title match (against the name or any translation) is
+ * always accepted. A loose top-hit is accepted only when the export shows
+ * the user actually watched episodes of it — a follow-only entry with no
+ * exact match stays unmatched rather than risk importing the wrong show.
+ */
+export function pickSearchResult(
+  results: SearchResult[],
+  title: string,
+  hasWatchEvidence: boolean,
+): SearchResult | null {
+  const candidates = results.filter((r) => r.type === 'series' && Number(r.tvdb_id) > 0)
+  if (!candidates.length) return null
+  const wanted = normalizeTitle(title)
+  if (wanted) {
+    const exact = candidates.find((r) =>
+      [r.name, ...Object.values(r.translations ?? {})].some(
+        (n) => n && normalizeTitle(n) === wanted,
+      ),
+    )
+    if (exact) return exact
+  }
+  return hasWatchEvidence ? candidates[0] : null
+}
+
 async function resolveSeriesId(show: ImportShow): Promise<{ id: number; byName: boolean } | null> {
   if (show.sourceId !== undefined && show.sourceId > 0) {
     try {
@@ -60,8 +87,8 @@ async function resolveSeriesId(show: ImportShow): Promise<{ id: number; byName: 
   }
   if (show.name) {
     const results = await searchSeries(show.name)
-    const first = results.find((r) => r.type === 'series' && Number(r.tvdb_id) > 0)
-    if (first) return { id: Number(first.tvdb_id), byName: true }
+    const match = pickSearchResult(results, show.name, show.episodes.length > 0)
+    if (match) return { id: Number(match.tvdb_id), byName: true }
   }
   return null
 }

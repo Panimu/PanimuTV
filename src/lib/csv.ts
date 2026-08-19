@@ -59,7 +59,7 @@ function splitRows(text: string, delimiter: string): string[][] {
 
 /** Parse CSV text into headers plus row objects keyed by normalized header. */
 export function parseCsv(input: string): CsvTable {
-  const text = input.replace(/^﻿/, '')
+  const text = input.replace(/^\uFEFF/, '')
   if (!text.trim()) return { headers: [], rows: [] }
   const delimiter = sniffDelimiter(text)
   const raw = splitRows(text, delimiter)

@@ -42,8 +42,16 @@ const SHOW_ID_KEYS = [
   'show_id',
   'tv_show_id',
   'tvshow_id',
-  'entity_id',
 ]
+
+// Newer TV Time tracking records identify rows as entity_type + entity_id,
+// where entity_id is an EPISODE id on watch rows. Only rows whose type says
+// series/show may use entity_id as a show id — anything else would resolve
+// to the wrong series entirely.
+const ENTITY_ID_KEY = 'entity_id'
+const ENTITY_TYPE_KEY = 'entity_type'
+// Deliberately specific: a bare `name`/`title` column matches profile and
+// episode CSVs and would fabricate junk "shows" (e.g. from the username).
 const SHOW_NAME_KEYS = [
   'show_name',
   'tv_show_name',
@@ -51,8 +59,6 @@ const SHOW_NAME_KEYS = [
   'series_title',
   'show_title',
   'episode_show_name',
-  'name',
-  'title',
 ]
 const SEASON_KEYS = [
   'season_number',
@@ -79,6 +85,20 @@ const DATE_KEYS = [
   'updated_at',
   'date',
 ]
+
+/**
+ * Loose title key: lowercase, no diacritics, separators removed entirely so
+ * dotted initialisms compare equal to their spelled forms
+ * ("S.H.I.E.L.D." ≡ "SHIELD").
+ */
+export function normalizeTitle(title: string): string {
+  return title
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '')
+}
 
 /** First header present in `keys`, or undefined. */
 function pick(headers: string[], keys: string[]): string | undefined {
@@ -112,6 +132,7 @@ export function classifyHeaders(headers: string[], fileName: string): FileKind {
   const hasEpisodeId = !!pick(headers, EPISODE_ID_KEYS)
   if ((hasSeason && hasEpisode) || hasEpisodeId) return 'episodes'
   if (pick(headers, SHOW_ID_KEYS) || pick(headers, SHOW_NAME_KEYS)) return 'shows'
+  if (headers.includes(ENTITY_ID_KEY) && headers.includes(ENTITY_TYPE_KEY)) return 'shows'
   return 'ignored'
 }
 
@@ -160,7 +181,9 @@ export function buildImportPlan(files: { name: string; text: string }[]): Import
     fileReport.push({ name: short, kind, rows: table.rows.length })
     if (kind === 'movies' || kind === 'ignored') continue
 
-    const idKey = pick(table.headers, SHOW_ID_KEYS)
+    const typeKey = table.headers.includes(ENTITY_TYPE_KEY) ? ENTITY_TYPE_KEY : undefined
+    let idKey = pick(table.headers, SHOW_ID_KEYS)
+    if (!idKey && typeKey && table.headers.includes(ENTITY_ID_KEY)) idKey = ENTITY_ID_KEY
     const nameKey = pick(table.headers, SHOW_NAME_KEYS)
     const seasonKey = pick(table.headers, SEASON_KEYS)
     const episodeKey = pick(table.headers, EPISODE_KEYS)
@@ -168,6 +191,12 @@ export function buildImportPlan(files: { name: string; text: string }[]): Import
     const dateKey = pick(table.headers, DATE_KEYS)
 
     for (const row of table.rows) {
+      // In typed record files, only series/show rows describe a show; watch
+      // rows carry an episode id in entity_id and must not create buckets.
+      if (kind === 'shows' && typeKey) {
+        const entityType = (row[typeKey] ?? '').toLowerCase()
+        if (!(entityType.includes('series') || entityType.includes('show'))) continue
+      }
       const sourceId = idKey ? toInt(row[idKey]) : undefined
       const name = nameKey ? row[nameKey] || undefined : undefined
       const bucket = bucketFor(buckets, sourceId, name)
@@ -199,6 +228,26 @@ export function buildImportPlan(files: { name: string; text: string }[]): Import
       })
       bucket.followOnly = false
     }
+  }
+
+  const idKeyByTitle = new Map<string, string>()
+  for (const [key, bucket] of buckets) {
+    if (key.startsWith('id:') && bucket.name) idKeyByTitle.set(normalizeTitle(bucket.name), key)
+  }
+  for (const [key, bucket] of [...buckets]) {
+    if (!key.startsWith('name:') || !bucket.name) continue
+    const targetKey = idKeyByTitle.get(normalizeTitle(bucket.name))
+    if (!targetKey) continue
+    const target = buckets.get(targetKey)!
+    for (const [epKey, ep] of bucket.episodes) {
+      const existing = target.episodes.get(epKey)
+      if (!existing) target.episodes.set(epKey, ep)
+      else if (ep.watchedAt && (!existing.watchedAt || ep.watchedAt < existing.watchedAt)) {
+        existing.watchedAt = ep.watchedAt
+      }
+    }
+    if (bucket.episodes.size > 0) target.followOnly = false
+    buckets.delete(key)
   }
 
   const shows: ImportShow[] = [...buckets.values()]

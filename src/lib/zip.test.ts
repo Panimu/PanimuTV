@@ -10,6 +10,8 @@ interface Entry {
   content: string
   /** 0 = stored, 8 = deflate */
   method: 0 | 8
+  /** general-purpose flags in the central header (bit 0 = encrypted) */
+  flags?: number
 }
 
 const utf8 = new TextEncoder()
@@ -55,6 +57,7 @@ async function buildZip(entries: Entry[], comment = ''): Promise<Uint8Array> {
     const cv = new DataView(central.buffer)
     cv.setUint32(0, 0x02014b50, true)
     cv.setUint16(6, 20, true)
+    cv.setUint16(8, entry.flags ?? 0, true)
     cv.setUint16(10, entry.method, true)
     cv.setUint32(20, data.length, true)
     cv.setUint32(24, raw.length, true)
@@ -125,6 +128,11 @@ describe('readZip', () => {
     const text = 'name\nBörgen — 日本語\n'
     const entries = await readZip(await zipBlob([{ name: 'u.csv', content: text, method: 8 }]))
     expect(await entries[0].text()).toBe(text)
+  })
+
+  it('rejects password-protected archives with a clear message', async () => {
+    const blob = await zipBlob([{ name: 'a.csv', content: 'x\n', method: 0, flags: 0x1 }])
+    await expect(readZip(blob)).rejects.toThrow(/password/i)
   })
 
   it('rejects files that are not ZIP archives', async () => {

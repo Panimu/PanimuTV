@@ -57,6 +57,7 @@ export async function readZip(file: Blob): Promise<ZipEntry[]> {
 
   for (let i = 0; i < count; i++) {
     if (ptr + 46 > view.byteLength || view.getUint32(ptr, true) !== CEN_SIG) break
+    const flags = view.getUint16(ptr + 8, true)
     const method = view.getUint16(ptr + 10, true)
     const compressedSize = view.getUint32(ptr + 20, true)
     const nameLen = view.getUint16(ptr + 28, true)
@@ -70,6 +71,9 @@ export async function readZip(file: Blob): Promise<ZipEntry[]> {
     if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue
     if (compressedSize === ZIP64_MARKER) {
       throw new ZipError('ZIP64 archives are not supported — unzip it and import the CSV files.')
+    }
+    if (flags & 0x1) {
+      throw new ZipError('This ZIP is password-protected — unzip it and import the CSV files.')
     }
 
     entries.push({
