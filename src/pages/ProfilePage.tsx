@@ -1,14 +1,16 @@
 // Profile: watching stats (computed from local data only), TheTVDB settings,
 // and data management (backup, restore, cache, reset).
 
-import { useMemo, useRef, useState } from 'react'
-import { cacheClear, cacheStats } from '../api/cache'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cacheClear } from '../api/cache'
 import { clearAuthToken, peekEpisodes } from '../api/tvdb'
 import { IconDownload, IconUpload } from '../components/Icons'
 import { APP_VERSION } from '../config'
 import { exportBackup, importBackup } from '../lib/backup'
 import { fmtMinutes } from '../lib/dates'
 import { computeStats } from '../lib/stats'
+import { fmtBytes, measureOrigin, measureStorage, type StorageReport } from '../lib/storage'
+import { TvTimeImport } from '../components/TvTimeImport'
 import { toast } from '../lib/toast'
 import { useLibrary } from '../store/library'
 import { useSettings } from '../store/settings'
@@ -62,10 +64,23 @@ export function ProfilePage() {
   const shows = useLibrary((s) => s.shows)
   const settings = useSettings()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [cacheInfo, setCacheInfo] = useState(() => cacheStats())
+  const [storage, setStorage] = useState<StorageReport>(() => measureStorage())
   // Value of the credential field when it gained focus, so blur only resets
   // the API session when something actually changed.
   const focusValueRef = useRef('')
+
+  const refreshStorage = useCallback(() => {
+    setStorage(measureStorage())
+    void measureOrigin().then((origin) => setStorage((prev) => ({ ...prev, ...origin })))
+  }, [])
+
+  // Keep the readout truthful while the page is open: the cache also grows
+  // from background fetches, which no store subscription would catch.
+  useEffect(() => {
+    refreshStorage()
+    const timer = setInterval(refreshStorage, 3000)
+    return () => clearInterval(timer)
+  }, [refreshStorage])
 
   const all = useMemo(() => Object.values(shows), [shows])
   const epsMap = useMemo(() => {
@@ -77,6 +92,11 @@ export function ProfilePage() {
 
   const maxGenre = Math.max(1, ...stats.topGenres.map((g) => g.count))
   const maxMonth = Math.max(1, ...stats.months.map((m) => m.count))
+
+  const pctRaw = (storage.totalBytes / storage.limitBytes) * 100
+  const pctUsed = Math.min(100, Math.round(pctRaw))
+  const pctLabel = storage.totalBytes > 0 && pctUsed === 0 ? '<1' : String(pctUsed)
+  const nearLimit = pctUsed >= 80
 
   async function onImportFile(file: File) {
     if (
@@ -289,6 +309,65 @@ export function ProfilePage() {
           Everything lives in this browser's local storage. Export a backup now and then —
           it's the only copy of your watch history.
         </p>
+
+        <div className="storage-block">
+          <div className="storage-head">
+            <span className="storage-total">{fmtBytes(storage.totalBytes)}</span>
+            <span className="storage-of">
+              of about {fmtBytes(storage.limitBytes)} local storage used ({pctLabel}%)
+            </span>
+          </div>
+          <div
+            className="storage-bar"
+            role="img"
+            aria-label={`Storage in use: ${storage.buckets
+              .map((b) => `${b.label} ${fmtBytes(b.bytes)}`)
+              .join(', ')}`}
+          >
+            {storage.buckets.map((bucket) => (
+              <div
+                key={bucket.id}
+                className={`storage-seg storage-seg-${bucket.id}`}
+                style={{
+                  width: `${Math.max(2, (bucket.bytes / Math.max(1, storage.totalBytes)) * 100)}%`,
+                }}
+                title={`${bucket.label}: ${fmtBytes(bucket.bytes)}`}
+              />
+            ))}
+          </div>
+          {storage.buckets.length > 0 ? (
+            <ul className="storage-legend">
+              {storage.buckets.map((bucket) => (
+                <li key={bucket.id}>
+                  <span className={`storage-dot storage-seg-${bucket.id}`} />
+                  <span className="storage-legend-label">{bucket.label}</span>
+                  <span className="storage-legend-size">{fmtBytes(bucket.bytes)}</span>
+                  <span className="storage-legend-hint">{bucket.hint}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hint storage-empty">
+              Nothing stored yet — add a show and your library will appear here.
+            </p>
+          )}
+          {storage.originUsageBytes !== undefined && (
+            <p className="hint storage-origin">
+              Offline app cache: {fmtBytes(storage.originUsageBytes)}
+              {storage.originQuotaBytes
+                ? ` of ${fmtBytes(storage.originQuotaBytes)} the browser allows this site`
+                : ''}
+              . Counted separately from local storage above.
+            </p>
+          )}
+          {nearLimit && (
+            <div className="notice">
+              Local storage is filling up. Clearing the API cache below frees space instantly —
+              it re-downloads on demand.
+            </div>
+          )}
+        </div>
+
         <div className="btn-row">
           <button
             className="btn btn-accent"
@@ -317,16 +396,18 @@ export function ProfilePage() {
             className="btn"
             onClick={() => {
               const removed = cacheClear()
-              setCacheInfo(cacheStats())
+              refreshStorage()
               toast(`Cleared ${removed} cached entr${removed === 1 ? 'y' : 'ies'}`)
             }}
           >
-            Clear API cache ({cacheInfo.entries} entries, {(cacheInfo.bytes / 1024).toFixed(0)} KB)
+            Clear API cache
           </button>
           <button className="btn btn-danger" onClick={resetEverything}>
             Reset everything
           </button>
         </div>
+
+        <TvTimeImport />
       </section>
 
       {/* ------------------------------------------------ About */}

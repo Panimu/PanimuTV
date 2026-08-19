@@ -42,9 +42,25 @@ Built with Vite + React + TypeScript. Dark, poster-forward UI.
 - Top genres, last-12-months activity chart (with table view), most-watched shows.
 
 **Your data**
+- Live storage breakdown: how much local storage the library, the API cache,
+  settings and the auth token each use, as a share of the browser's ~5 MB
+  limit, with a warning before you run out.
 - One-click JSON backup export / import (library + settings).
-- API response cache with size display and one-click clear.
+- API response cache with one-click clear.
 - Full reset. Everything namespaced under `panimu.*` in localStorage.
+
+**Import from TV Time**
+- Drop in the ZIP from TV Time's personal-data export (Settings → Account →
+  Download my data) and it reads the CSVs in-browser — no upload, no server.
+- Tolerant parsing: files are classified by sniffing their headers against
+  synonym lists rather than assuming one schema, so exports of different
+  vintages all work. Movie files are skipped and reported.
+- Shows resolve by TheTVDB id first (verified by fetching the series), then
+  fall back to a title search; episodes match on season/episode number.
+- Preview before committing, live progress, then a report listing what was
+  matched by title and what wasn't found.
+- Purely additive — an import never unmarks anything, keeps the earliest
+  watch date on conflicts, and re-running it is safe.
 
 Also: installable PWA (service worker precaches the app shell, artwork is
 cached offline, updates apply automatically), responsive layout (sidebar on
@@ -57,9 +73,9 @@ The app deploys to GitHub Pages on every push to the default branch:
 
 **https://panimu.github.io/PanimuTV/**
 
-`.github/workflows/deploy.yml` builds `dist/` and publishes it; the
-`configure-pages` step auto-enables Pages on first run. Because all state is
-in localStorage, the hosted app is still 100% private to your browser.
+`.github/workflows/deploy.yml` builds `dist/` and force-publishes it to the
+`gh-pages` branch, which GitHub Pages serves. Because all state is in
+localStorage, the hosted app is still 100% private to your browser.
 
 ### Install on iPhone/iPad (PWA)
 
@@ -88,9 +104,8 @@ npm test           # unit tests (vitest)
 ```
 
 The `dist/` folder is fully static (hash-based routing, relative asset paths),
-so it can be served from any static host or GitHub Pages — a Pages deploy
-workflow is included (`.github/workflows/deploy.yml`, runs on pushes to
-`main`; enable **Settings → Pages → Source: GitHub Actions** once).
+so it can be served from any static host — just copy it. GitHub Pages is
+already wired up (see **Hosted app** above).
 
 ## TheTVDB API
 
@@ -134,7 +149,12 @@ src/
   pages/      Watch Next, My Shows, Show, Schedule, Discover, Profile
 ```
 
-The pure logic in `src/lib` is unit-tested (`npm test`).
+The pure logic in `src/lib` is unit-tested (`npm test`) — dates, episode
+progress, schedule grouping, CSV parsing, the ZIP reader (against real
+archives), and the TV Time plan builder.
+
+The ZIP reader is built on the browser's native `DecompressionStream`, so
+importing an archive adds no runtime dependency.
 
 ## Path to a native iOS app
 

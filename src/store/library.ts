@@ -11,6 +11,7 @@ interface LibraryState {
   toggleFavorite: (id: number) => void
   setRating: (id: number, rating?: number) => void
   setWatched: (id: number, episodeIds: number[], watched: boolean) => void
+  mergeWatched: (id: number, watched: Record<number, number>) => void
   replaceAll: (shows: Record<number, TrackedShow>) => void
 }
 
@@ -68,6 +69,21 @@ export const useLibrary = create<LibraryState>()(
             else delete map[epId]
           }
           return { shows: { ...st.shows, [id]: { ...cur, watched: map, updatedAt: now } } }
+        }),
+
+      // Additive merge used by imports: existing history is never removed,
+      // and the earliest known watch date wins.
+      mergeWatched: (id, incoming) =>
+        set((st) => {
+          const cur = st.shows[id]
+          if (!cur) return st
+          const map = { ...cur.watched }
+          for (const [epId, ts] of Object.entries(incoming)) {
+            const key = Number(epId)
+            const existing = map[key]
+            map[key] = existing !== undefined ? Math.min(existing, ts) : ts
+          }
+          return { shows: { ...st.shows, [id]: { ...cur, watched: map, updatedAt: Date.now() } } }
         }),
 
       replaceAll: (shows) => set({ shows }),
