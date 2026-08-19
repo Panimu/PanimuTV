@@ -12,7 +12,8 @@ import { todayISO } from './dates'
 import { hasAired, isRegular } from './episodes'
 import { applyExtended } from './actions'
 import { pooled } from './pool'
-import { normalizeTitle, type ImportPlan, type ImportShow } from './tvtime'
+import { searchResultScore } from './titleMatch'
+import type { ImportPlan, ImportShow } from './tvtime'
 import type { Ep, TrackedShow, UserStatus } from '../types'
 
 export interface ImportProgress {
@@ -51,11 +52,21 @@ function inferStatus(
 }
 
 /**
+ * Titles must score at least this against a candidate's name, a translation,
+ * or an alias before a search match is trusted on its own. High enough to
+ * reject "24" → "24 Hours in A&E" (0.65), low enough to accept partial
+ * titles like "Deep Space Nine" → "Star Trek: Deep Space Nine" (0.78) and
+ * qualifier variants like "The Office" → "The Office (US)" (0.95).
+ */
+const STRONG_TITLE_MATCH = 0.75
+
+/**
  * Choose a search result for a title, or null if none is trustworthy.
- * An exact normalized-title match (against the name or any translation) is
- * always accepted. A loose top-hit is accepted only when the export shows
- * the user actually watched episodes of it — a follow-only entry with no
- * exact match stays unmatched rather than risk importing the wrong show.
+ * The best-scoring candidate wins when it clears STRONG_TITLE_MATCH.
+ * Below that, evidence the user actually watched episodes justifies a
+ * looser pick — the best partial match if any titles relate at all,
+ * otherwise the API's top relevance hit. A follow-only entry with no
+ * strong match stays unmatched rather than risk importing the wrong show.
  */
 export function pickSearchResult(
   results: SearchResult[],
@@ -64,16 +75,20 @@ export function pickSearchResult(
 ): SearchResult | null {
   const candidates = results.filter((r) => r.type === 'series' && Number(r.tvdb_id) > 0)
   if (!candidates.length) return null
-  const wanted = normalizeTitle(title)
-  if (wanted) {
-    const exact = candidates.find((r) =>
-      [r.name, ...Object.values(r.translations ?? {})].some(
-        (n) => n && normalizeTitle(n) === wanted,
-      ),
-    )
-    if (exact) return exact
+
+  let best: SearchResult | null = null
+  let bestScore = 0
+  for (const candidate of candidates) {
+    const score = searchResultScore(candidate, title)
+    if (score > bestScore) {
+      bestScore = score
+      best = candidate
+    }
   }
-  return hasWatchEvidence ? candidates[0] : null
+
+  if (best && bestScore >= STRONG_TITLE_MATCH) return best
+  if (hasWatchEvidence) return bestScore > 0 && best ? best : candidates[0]
+  return null
 }
 
 async function resolveSeriesId(show: ImportShow): Promise<{ id: number; byName: boolean } | null> {

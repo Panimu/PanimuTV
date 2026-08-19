@@ -9,6 +9,7 @@ import { ShowCard } from '../components/ShowCard'
 import { seedFromBase, seedFromSearch } from '../lib/actions'
 import { fmtDate } from '../lib/dates'
 import { byGenreName, comingSoon, newThisYear, topGenresOf, topRated, trendingNow } from '../lib/discover'
+import { rankSearchResults } from '../lib/titleMatch'
 import { useLibrary } from '../store/library'
 
 export function DiscoverPage() {
@@ -57,6 +58,14 @@ export function DiscoverPage() {
     [libraryShows],
   )
 
+  // Surface the closest titles first for partial queries; TVDB's own
+  // relevance order breaks ties (and stands alone for very short queries).
+  const rankedResults = useMemo(() => {
+    const list = (results ?? []).filter((r) => r.type === 'series' && Number(r.tvdb_id) > 0)
+    const q = query.trim()
+    return q.length >= 3 ? rankSearchResults(list, q) : list
+  }, [results, query])
+
   const year = new Date().getFullYear()
   const isSearchMode = searching || results !== null || !!searchError
 
@@ -100,15 +109,9 @@ export function DiscoverPage() {
             <div className="hint">No shows found for “{query.trim()}”.</div>
           )}
           <div className="card-grid">
-            {(results ?? [])
-              .filter((r) => r.type === 'series' && Number(r.tvdb_id) > 0)
-              .map((r) => (
-                <ShowCard
-                  key={r.objectID}
-                  seed={seedFromSearch(r)}
-                  meta={r.network ?? r.status}
-                />
-              ))}
+            {rankedResults.map((r) => (
+              <ShowCard key={r.objectID} seed={seedFromSearch(r)} meta={r.network ?? r.status} />
+            ))}
           </div>
         </section>
       ) : (

@@ -9,7 +9,12 @@ Built with Vite + React + TypeScript. Dark, poster-forward UI.
 ## Features
 
 **Tracking**
-- Search TheTVDB and add shows with one tap.
+- Search TheTVDB and add shows with one tap; results are re-ranked so the
+  closest titles to a partial query come first (aliases and translations
+  count too).
+- Filter box on My Shows with forgiving matching — mid-word fragments
+  ("ffic" finds The Office) and out-of-order word prefixes ("bad break"
+  finds Breaking Bad).
 - Five library statuses: Watching · Plan to Watch · On Hold · Completed · Dropped.
 - Episode-level watch tracking: per-episode toggle, "mark season watched",
   and "watch up to here" (marks everything before an episode in one go).
@@ -56,7 +61,11 @@ Built with Vite + React + TypeScript. Dark, poster-forward UI.
   synonym lists rather than assuming one schema, so exports of different
   vintages all work. Movie files are skipped and reported.
 - Shows resolve by TheTVDB id first (verified by fetching the series), then
-  fall back to a title search; episodes match on season/episode number.
+  fall back to a similarity-scored title search: qualifier variants ("The
+  Office" ↔ "The Office (US)"), partial titles ("Deep Space Nine" ↔ "Star
+  Trek: Deep Space Nine"), dotted initialisms, and aliases all match, while
+  weak fragments are refused rather than guessed. Episodes match on
+  season/episode number.
 - Preview before committing, live progress, then a report listing what was
   matched by title and what wasn't found.
 - Purely additive — an import never unmarks anything, keeps the earliest

@@ -6,6 +6,9 @@
 // anything unrecognized is reported rather than silently dropped.
 
 import { parseCsv } from './csv'
+import { normalizeTitle } from './titleMatch'
+
+export { normalizeTitle }
 
 export interface ImportEpisode {
   s: number
@@ -85,20 +88,6 @@ const DATE_KEYS = [
   'updated_at',
   'date',
 ]
-
-/**
- * Loose title key: lowercase, no diacritics, separators removed entirely so
- * dotted initialisms compare equal to their spelled forms
- * ("S.H.I.E.L.D." ≡ "SHIELD").
- */
-export function normalizeTitle(title: string): string {
-  return title
-    .normalize('NFD')
-    .replace(/\p{M}+/gu, '')
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[^a-z0-9]+/g, '')
-}
 
 /** First header present in `keys`, or undefined. */
 function pick(headers: string[], keys: string[]): string | undefined {

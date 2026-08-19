@@ -1034,6 +1034,16 @@ img.poster,
   margin-bottom: 6px;
 }
 
+.search-box-compact {
+  max-width: 380px;
+  margin: 2px 0 4px;
+}
+
+.search-box-compact input {
+  padding: 9px 38px;
+  font-size: 14px;
+}
+
 .search-box input {
   width: 100%;
   padding: 12px 42px;

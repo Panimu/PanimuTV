@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { IconStar } from '../components/Icons'
+import { IconSearch, IconStar, IconX } from '../components/Icons'
 import { PosterImg } from '../components/PosterImg'
 import { ProgressBar } from '../components/ProgressBar'
 import { relTime, todayISO } from '../lib/dates'
 import { lastActivityTs, progressOf } from '../lib/episodes'
+import { matchesQuery } from '../lib/titleMatch'
 import { useEpisodesMap } from '../lib/useEpisodes'
 import { useLibrary } from '../store/library'
 import {
@@ -30,13 +31,16 @@ export function MyShowsPage() {
   const shows = useLibrary((s) => s.shows)
   const [tab, setTab] = useState<Tab>('all')
   const [sort, setSort] = useState<SortMode>('activity')
+  const [query, setQuery] = useState('')
 
   const all = useMemo(() => Object.values(shows), [shows])
   const filtered = useMemo(() => {
-    if (tab === 'all') return all
-    if (tab === 'favorites') return all.filter((s) => s.favorite)
-    return all.filter((s) => s.userStatus === tab)
-  }, [all, tab])
+    let list = all
+    if (tab === 'favorites') list = list.filter((s) => s.favorite)
+    else if (tab !== 'all') list = list.filter((s) => s.userStatus === tab)
+    if (query.trim()) list = list.filter((s) => matchesQuery(s.name, query))
+    return list
+  }, [all, tab, query])
 
   const { map } = useEpisodesMap(filtered)
   const today = todayISO()
@@ -104,6 +108,27 @@ export function MyShowsPage() {
         </label>
       </div>
 
+      <div className="search-box search-box-compact">
+        <IconSearch size={16} className="search-icon" />
+        <input
+          type="search"
+          value={query}
+          placeholder="Filter your shows…"
+          aria-label="Filter your shows"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {query && (
+          <button
+            type="button"
+            className="search-clear"
+            onClick={() => setQuery('')}
+            aria-label="Clear filter"
+          >
+            <IconX size={15} />
+          </button>
+        )}
+      </div>
+
       <div className="chip-row">
         {tabs.map(({ key, label }) => (
           <button
@@ -118,14 +143,22 @@ export function MyShowsPage() {
         ))}
       </div>
 
-      {sorted.length === 0 && (
-        <div className="empty-block">
-          <p>Nothing here yet.</p>
-          <Link to="/discover" className="btn">
-            Find shows to track
-          </Link>
-        </div>
-      )}
+      {sorted.length === 0 &&
+        (query.trim() ? (
+          <div className="empty-block">
+            <p>No shows match “{query.trim()}”.</p>
+            <button className="btn" onClick={() => setQuery('')}>
+              Clear filter
+            </button>
+          </div>
+        ) : (
+          <div className="empty-block">
+            <p>Nothing here yet.</p>
+            <Link to="/discover" className="btn">
+              Find shows to track
+            </Link>
+          </div>
+        ))}
 
       <div className="poster-grid">
         {sorted.map((show) => {

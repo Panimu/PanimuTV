@@ -18,6 +18,7 @@ export interface SearchResult {
   tvdb_id: string
   name: string
   slug?: string
+  aliases?: string[]
   image_url?: string
   thumbnail?: string
   year?: string
