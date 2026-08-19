@@ -90,6 +90,7 @@ export function SchedulePage() {
           <button
             key={status}
             className={`chip chip-btn ${scheduleStatuses.includes(status) ? 'chip-active' : ''}`}
+            aria-pressed={scheduleStatuses.includes(status)}
             onClick={() => toggleStatus(status)}
             title={`Toggle ${USER_STATUS_LABELS[status]} shows in the schedule`}
           >

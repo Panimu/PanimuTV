@@ -26,8 +26,13 @@ export function useEpisodes(showId: number | undefined, airStatus?: string) {
     [showId, airStatus],
   )
 
+  // Clear only when the show itself changes — a late-arriving airStatus hint
+  // re-runs `load` but must not blank out an already-rendered episode list.
   useEffect(() => {
     setEps(null)
+  }, [showId])
+
+  useEffect(() => {
     void load(false)
   }, [load])
 

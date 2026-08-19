@@ -1,7 +1,7 @@
 // Discover: search TheTVDB, plus curated rows — trending, coming soon,
 // new this year, all-time favorites, and genre picks seeded from your library.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { searchSeries } from '../api/tvdb'
 import type { SearchResult, SeriesBase } from '../api/types'
 import { IconSearch, IconX } from '../components/Icons'
@@ -18,33 +18,38 @@ export function DiscoverPage() {
   const [searchError, setSearchError] = useState<string | null>(null)
   const searchSeq = useRef(0)
 
+  const runSearch = useCallback((q: string) => {
+    const seq = ++searchSeq.current
+    setSearching(true)
+    setSearchError(null)
+    searchSeries(q)
+      .then((r) => {
+        if (searchSeq.current === seq) setResults(r)
+      })
+      .catch((err) => {
+        if (searchSeq.current === seq) {
+          setSearchError(err instanceof Error ? err.message : String(err))
+        }
+      })
+      .finally(() => {
+        if (searchSeq.current === seq) setSearching(false)
+      })
+  }, [])
+
+  // Auto-search after a pause for 2+ characters. Shorter titles ("V", "W")
+  // can still be searched explicitly with Enter (see the form's onSubmit).
   useEffect(() => {
     const q = query.trim()
     if (q.length < 2) {
+      searchSeq.current++ // invalidate any in-flight search
       setResults(null)
       setSearching(false)
       setSearchError(null)
       return
     }
-    setSearching(true)
-    setSearchError(null)
-    const seq = ++searchSeq.current
-    const timer = setTimeout(() => {
-      searchSeries(q)
-        .then((r) => {
-          if (searchSeq.current === seq) setResults(r)
-        })
-        .catch((err) => {
-          if (searchSeq.current === seq) {
-            setSearchError(err instanceof Error ? err.message : String(err))
-          }
-        })
-        .finally(() => {
-          if (searchSeq.current === seq) setSearching(false)
-        })
-    }, 400)
+    const timer = setTimeout(() => runSearch(q), 400)
     return () => clearTimeout(timer)
-  }, [query])
+  }, [query, runSearch])
 
   const libraryShows = useLibrary((s) => s.shows)
   const favoriteGenres = useMemo(
@@ -53,13 +58,20 @@ export function DiscoverPage() {
   )
 
   const year = new Date().getFullYear()
-  const isSearchMode = query.trim().length >= 2
+  const isSearchMode = searching || results !== null || !!searchError
 
   return (
     <div className="page">
       <h1 className="page-title">Discover</h1>
 
-      <div className="search-box">
+      <form
+        className="search-box"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const q = query.trim()
+          if (q) runSearch(q)
+        }}
+      >
         <IconSearch size={18} className="search-icon" />
         <input
           type="search"
@@ -67,14 +79,18 @@ export function DiscoverPage() {
           placeholder="Search TheTVDB for a show…"
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search shows"
-          autoFocus
         />
         {query && (
-          <button className="search-clear" onClick={() => setQuery('')} aria-label="Clear search">
+          <button
+            type="button"
+            className="search-clear"
+            onClick={() => setQuery('')}
+            aria-label="Clear search"
+          >
             <IconX size={16} />
           </button>
         )}
-      </div>
+      </form>
 
       {isSearchMode ? (
         <section className="section">

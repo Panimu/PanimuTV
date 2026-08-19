@@ -6,6 +6,7 @@ import type { SearchResult, SeriesBase, SeriesExtended } from '../api/types'
 import { useLibrary } from '../store/library'
 import { useSettings } from '../store/settings'
 import { USER_STATUS_LABELS, type UserStatus } from '../types'
+import { pooled } from './pool'
 import { toast } from './toast'
 
 export interface ShowSeed {
@@ -20,15 +21,16 @@ export interface ShowSeed {
 }
 
 export function seedFromSearch(r: SearchResult): ShowSeed {
+  const lang = useSettings.getState().language
   return {
     id: Number(r.tvdb_id),
-    name: r.translations?.eng ?? r.name,
+    name: r.translations?.[lang] || r.translations?.eng || r.name,
     slug: r.slug,
     poster: r.image_url,
     year: r.year,
     network: r.network,
     airStatus: r.status,
-    overview: r.overviews?.eng ?? r.overview,
+    overview: r.overviews?.[lang] || r.overviews?.eng || r.overview,
   }
 }
 
@@ -81,8 +83,8 @@ export function trackShow(seed: ShowSeed, status?: UserStatus): void {
 }
 
 /** Fetch extended metadata for a tracked show and merge it into the library. */
-export async function enrichShow(id: number): Promise<void> {
-  const ext = await getSeriesExtended(id)
+export async function enrichShow(id: number, force = false): Promise<void> {
+  const ext = await getSeriesExtended(id, force)
   applyExtended(id, ext)
   fetchEpisodes(id, ext.status?.name).catch(() => {
     /* warm the episode cache opportunistically */
@@ -124,4 +126,37 @@ export async function refreshShow(id: number): Promise<void> {
   const ext = await getSeriesExtended(id, true)
   applyExtended(id, ext)
   await fetchEpisodes(id, ext.status?.name, true)
+}
+
+// How long tracked-show metadata (nextAired, status, …) may go unsynced
+// before the app refreshes it on launch.
+const SYNC_STALE_MS = 24 * 3600_000
+const SYNC_STALE_ENDED_MS = 7 * 24 * 3600_000
+const SYNC_BATCH_LIMIT = 30
+
+let autoSyncStarted = false
+
+/**
+ * Keep the library fresh without manual refreshes: on app launch, re-sync
+ * the stalest tracked shows (running shows daily, ended weekly). Best-effort
+ * and rate-limited through the request pool; failures are silent — cached
+ * data keeps working.
+ */
+export function autoSyncLibrary(): void {
+  if (autoSyncStarted) return
+  autoSyncStarted = true
+  const now = Date.now()
+  const stale = Object.values(useLibrary.getState().shows)
+    .filter((show) => {
+      const status = (show.airStatus ?? '').toLowerCase()
+      const ended = status.includes('end') || status.includes('cancel')
+      return now - (show.lastSyncedAt ?? 0) > (ended ? SYNC_STALE_ENDED_MS : SYNC_STALE_MS)
+    })
+    .sort((a, b) => (a.lastSyncedAt ?? 0) - (b.lastSyncedAt ?? 0))
+    .slice(0, SYNC_BATCH_LIMIT)
+  for (const show of stale) {
+    void pooled(() => enrichShow(show.id, true)).catch(() => {
+      /* stay on cached data */
+    })
+  }
 }

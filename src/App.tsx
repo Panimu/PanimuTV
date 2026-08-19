@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { HashRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { autoSyncLibrary } from './lib/actions'
 import {
   IconCalendar,
   IconCompass,
@@ -24,6 +26,11 @@ const NAV_ITEMS = [
 ]
 
 export default function App() {
+  // Keep tracked shows' nextAired/status/episodes fresh without manual refreshes.
+  useEffect(() => {
+    autoSyncLibrary()
+  }, [])
+
   return (
     <HashRouter>
       <div className="app">

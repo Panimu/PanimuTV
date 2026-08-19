@@ -27,8 +27,12 @@ export function exportBackup(): void {
   const a = document.createElement('a')
   a.href = url
   a.download = `panimutv-backup-${new Date().toISOString().slice(0, 10)}.json`
+  // iOS Safari needs the anchor in the DOM, and revoking the URL immediately
+  // can cancel the download — defer it.
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 
 /** Replace the current library/settings with a backup. Returns show count. */

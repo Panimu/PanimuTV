@@ -52,14 +52,20 @@ export function MyShowsPage() {
       case 'progress':
         list.sort((a, b) => progressPct(b) - progressPct(a))
         break
-      case 'nextAired':
+      case 'nextAired': {
+        // A nextAired in the past is stale data, not an upcoming episode.
+        const upcoming = (s: TrackedShow) =>
+          s.nextAired && s.nextAired >= today ? s.nextAired : null
         list.sort((a, b) => {
-          if (a.nextAired && b.nextAired) return a.nextAired.localeCompare(b.nextAired)
-          if (a.nextAired) return -1
-          if (b.nextAired) return 1
+          const an = upcoming(a)
+          const bn = upcoming(b)
+          if (an && bn) return an.localeCompare(bn)
+          if (an) return -1
+          if (bn) return 1
           return a.name.localeCompare(b.name)
         })
         break
+      }
       default:
         list.sort((a, b) => lastActivityTs(b) - lastActivityTs(a))
     }
@@ -103,6 +109,7 @@ export function MyShowsPage() {
           <button
             key={key}
             className={`chip chip-btn ${tab === key ? 'chip-active' : ''}`}
+            aria-pressed={tab === key}
             onClick={() => setTab(key)}
           >
             {label}

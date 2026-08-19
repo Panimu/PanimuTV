@@ -63,6 +63,9 @@ export function ProfilePage() {
   const settings = useSettings()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [cacheInfo, setCacheInfo] = useState(() => cacheStats())
+  // Value of the credential field when it gained focus, so blur only resets
+  // the API session when something actually changed.
+  const focusValueRef = useRef('')
 
   const all = useMemo(() => Object.values(shows), [shows])
   const epsMap = useMemo(() => {
@@ -223,9 +226,14 @@ export function ProfilePage() {
               value={settings.apiKey}
               spellCheck={false}
               onChange={(e) => settings.update({ apiKey: e.target.value })}
-              onBlur={() => {
-                clearAuthToken()
-                toast('API session reset — the new key is used on the next request')
+              onFocus={(e) => {
+                focusValueRef.current = e.target.value
+              }}
+              onBlur={(e) => {
+                if (e.target.value !== focusValueRef.current) {
+                  clearAuthToken()
+                  toast('API key updated — a new session starts on the next request')
+                }
               }}
             />
           </label>
@@ -237,7 +245,12 @@ export function ProfilePage() {
               spellCheck={false}
               placeholder="Usually empty"
               onChange={(e) => settings.update({ pin: e.target.value })}
-              onBlur={() => clearAuthToken()}
+              onFocus={(e) => {
+                focusValueRef.current = e.target.value
+              }}
+              onBlur={(e) => {
+                if (e.target.value !== focusValueRef.current) clearAuthToken()
+              }}
             />
           </label>
           <label className="field">

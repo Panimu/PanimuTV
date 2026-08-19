@@ -1,7 +1,7 @@
 // Show detail: artwork header, tracking controls, and season-by-season
 // episode list with per-episode / per-season / watch-up-to-here marking.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getSeriesExtended, img, pickTranslation } from '../api/tvdb'
 import type { SeriesExtended } from '../api/types'
@@ -131,16 +131,20 @@ export function ShowPage() {
     return numbers.map((n) => ({ n, eps: bySeason.get(n)! }))
   }, [eps])
 
+  // Auto-open the most relevant season once per show; never fight the user's
+  // own toggling after that (background refetches must not reset it).
   const [openSeason, setOpenSeason] = useState<number | null>(null)
+  const autoOpenedForRef = useRef<number | null>(null)
   useEffect(() => {
     if (!eps || !eps.length) return
+    if (autoOpenedForRef.current === showId) return
+    autoOpenedForRef.current = showId
     const next = tracked ? nextUp(tracked.watched, eps, today) : null
     const regulars = eps.filter(isRegular)
     const fallback = regulars.length ? regulars[regulars.length - 1].s : eps[eps.length - 1].s
     setOpenSeason(next ? next.s : fallback)
-    // Only when the episode list (or tracking) first becomes available.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eps === null, tracked?.id])
+  }, [eps, showId])
 
   const progress = tracked && eps ? progressOf(tracked.watched, eps, today) : null
 
@@ -345,8 +349,14 @@ function SeasonBlock({
           {open ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
           <span className="season-name">{title}</span>
           <span className="season-count">
-            {watched ? `${watchedCount}/${aired.length} watched` : `${eps.length} episodes`}
-            {eps.length > aired.length && ` · ${eps.length - aired.length} upcoming`}
+            {aired.length === 0
+              ? `${eps.length} upcoming`
+              : watched
+                ? `${watchedCount}/${aired.length} watched`
+                : `${eps.length} episodes`}
+            {aired.length > 0 &&
+              eps.length > aired.length &&
+              ` · ${eps.length - aired.length} upcoming`}
           </span>
         </button>
         {onSetWatched && aired.length > 0 && (
