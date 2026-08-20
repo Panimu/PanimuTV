@@ -1,7 +1,7 @@
 {
   "name": "panimutv",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "A TVTime-style personal TV show tracker backed by TheTVDB and browser local storage.",
   "type": "module",
   "scripts": {

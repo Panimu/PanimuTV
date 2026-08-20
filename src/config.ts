@@ -2,4 +2,4 @@
 // so the key ships with the client; it can be overridden in Profile → Settings.
 export const DEFAULT_API_KEY = '5642fe44-f494-4ae8-be05-cc171eba3559'
 
-export const APP_VERSION = '1.3.0'
+export const APP_VERSION = '1.4.0'

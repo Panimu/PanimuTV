@@ -1,41 +1,70 @@
-// Builds the scrollable release list: tracked shows' episodes grouped by day.
+// The scrollable release list, indexed by DAY.
+//
+// The index holds `showId` rather than a show object: episode data is stable
+// and expensive to rebuild, while show records change every time the user
+// marks something watched. Keeping them apart lets the index survive those
+// updates, with the page resolving live show state at render time.
 
 import type { Ep, TrackedShow } from '../types'
 
-export interface ScheduleItem {
-  show: TrackedShow
+export interface ScheduleEntry {
+  showId: number
   ep: Ep
 }
 
-export interface ScheduleGroup {
+export interface ScheduleDay {
   date: string
-  items: ScheduleItem[]
+  entries: ScheduleEntry[]
 }
 
-export function buildSchedule(
-  shows: TrackedShow[],
-  epsByShow: Record<number, Ep[]>,
+/** date (YYYY-MM-DD) → episodes airing that day. */
+export type DayIndex = Map<string, ScheduleEntry[]>
+
+/**
+ * Add one show's in-window episodes to the index, replacing any entries it
+ * previously contributed (so a refetch cannot duplicate rows).
+ * Cost is proportional to that show's episode count, not the whole library.
+ */
+export function indexShow(
+  index: DayIndex,
+  showId: number,
+  eps: Ep[],
   start: string,
   end: string,
-): ScheduleGroup[] {
-  const byDate = new Map<string, ScheduleItem[]>()
-  for (const show of shows) {
-    for (const ep of epsByShow[show.id] ?? []) {
-      if (!ep.aired || ep.aired < start || ep.aired > end) continue
-      const list = byDate.get(ep.aired)
-      if (list) list.push({ show, ep })
-      else byDate.set(ep.aired, [{ show, ep }])
-    }
+): void {
+  removeShow(index, showId)
+  for (const ep of eps) {
+    if (!ep.aired || ep.aired < start || ep.aired > end) continue
+    const day = index.get(ep.aired)
+    if (day) day.push({ showId, ep })
+    else index.set(ep.aired, [{ showId, ep }])
   }
-  return [...byDate.entries()]
-    .map(([date, items]) => ({
+}
+
+export function removeShow(index: DayIndex, showId: number): void {
+  for (const [date, entries] of index) {
+    const kept = entries.filter((entry) => entry.showId !== showId)
+    if (kept.length === entries.length) continue
+    if (kept.length) index.set(date, kept)
+    else index.delete(date)
+  }
+}
+
+/** Flatten the index into day groups, oldest first, each sorted by show name. */
+export function toDays(index: DayIndex, nameById: Map<number, string>): ScheduleDay[] {
+  const days: ScheduleDay[] = []
+  for (const [date, entries] of index) {
+    days.push({
       date,
-      items: items.sort(
+      entries: [...entries].sort(
         (a, b) =>
-          a.show.name.localeCompare(b.show.name) || a.ep.s - b.ep.s || a.ep.e - b.ep.e,
+          (nameById.get(a.showId) ?? '').localeCompare(nameById.get(b.showId) ?? '') ||
+          a.ep.s - b.ep.s ||
+          a.ep.e - b.ep.e,
       ),
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date))
+    })
+  }
+  return days.sort((a, b) => a.date.localeCompare(b.date))
 }
 
 /**

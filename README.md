@@ -29,8 +29,13 @@ Built with Vite + React + TypeScript. Dark, poster-forward UI.
 **Schedule — scrollable release list**
 - Every episode from your tracked shows in one chronological list, grouped by
   day, auto-scrolled to Today.
-- Extends backwards ("Load earlier") and forwards ("Load later") as far as you
-  like; premiere / season-finale / midseason badges and air-date countdowns.
+- Loads by day, not by show: a show whose run provably cannot touch the
+  visible dates is never fetched, cached data paints on the first render, and
+  the rest arrives nearest-airing-first — so today's episodes appear while a
+  large library is still loading. Days render progressively outward from
+  Today and extend as you scroll.
+- Extends backwards ("Earlier episodes") and forwards as far as you like;
+  premiere / season-finale / midseason badges and air-date countdowns.
 - Filter by library status (chips at the top), mark aired episodes watched
   right from the list, and a "Waiting for dates" bucket for running/announced
   shows with nothing scheduled yet.

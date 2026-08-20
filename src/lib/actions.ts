@@ -6,7 +6,7 @@ import type { SearchResult, SeriesBase, SeriesExtended } from '../api/types'
 import { useLibrary } from '../store/library'
 import { useSettings } from '../store/settings'
 import { USER_STATUS_LABELS, type UserStatus } from '../types'
-import { pooled } from './pool'
+import { pooled, PRIORITY } from './pool'
 import { toast } from './toast'
 
 export interface ShowSeed {
@@ -116,6 +116,7 @@ export function applyExtended(id: number, ext: SeriesExtended): void {
     genres: (ext.genres ?? []).map((g) => g.name),
     overview: tr.overview ?? ext.overview,
     firstAired: ext.firstAired || undefined,
+    lastAired: ext.lastAired || undefined,
     nextAired: ext.nextAired || undefined,
     lastSyncedAt: Date.now(),
   })
@@ -155,7 +156,7 @@ export function autoSyncLibrary(): void {
     .sort((a, b) => (a.lastSyncedAt ?? 0) - (b.lastSyncedAt ?? 0))
     .slice(0, SYNC_BATCH_LIMIT)
   for (const show of stale) {
-    void pooled(() => enrichShow(show.id, true)).catch(() => {
+    void pooled(() => enrichShow(show.id, true), PRIORITY.background).catch(() => {
       /* stay on cached data */
     })
   }

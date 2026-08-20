@@ -14,9 +14,9 @@ import {
   nextUp,
   premiereLabel,
 } from '../lib/episodes'
-import { buildSchedule } from '../lib/schedule'
 import { toast } from '../lib/toast'
 import { useEpisodesMap } from '../lib/useEpisodes'
+import { useSchedule } from '../lib/useSchedule'
 import { useLibrary } from '../store/library'
 import { useSettings } from '../store/settings'
 import type { TrackedShow } from '../types'
@@ -32,14 +32,13 @@ export function HomePage() {
     () => all.filter((s) => scheduleStatuses.includes(s.userStatus)),
     [all, scheduleStatuses],
   )
-  const involved = useMemo(() => {
-    const seen = new Map<number, TrackedShow>()
-    for (const show of [...watching, ...scheduled]) seen.set(show.id, show)
-    return [...seen.values()]
-  }, [watching, scheduled])
-
-  const { map, loading, errors } = useEpisodesMap(involved)
   const today = todayISO()
+
+  // "Up next" genuinely needs each watched show's full episode list; the week
+  // strip only needs the next seven days, so it uses the day-first loader.
+  const { map, loading, errors } = useEpisodesMap(watching)
+  const weekEnd = useMemo(() => addDays(today, 7), [today])
+  const { days: weekDays } = useSchedule(scheduled, today, weekEnd, today)
 
   const upNext = useMemo(
     () =>
@@ -55,11 +54,15 @@ export function HomePage() {
     [watching, map, today],
   )
 
-  const week = useMemo(
-    () => buildSchedule(scheduled, map, today, addDays(today, 7)),
-    [scheduled, map, today],
+  const weekItems = useMemo(
+    () =>
+      weekDays.flatMap((day) =>
+        day.entries
+          .map((entry) => ({ show: shows[entry.showId], ep: entry.ep, date: day.date }))
+          .filter((item) => item.show),
+      ),
+    [weekDays, shows],
   )
-  const weekItems = useMemo(() => week.flatMap((g) => g.items.map((i) => ({ ...i, date: g.date }))), [week])
 
   if (!all.length) {
     return (

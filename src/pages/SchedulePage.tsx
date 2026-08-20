@@ -1,20 +1,31 @@
 // Schedule: one scrollable release list of every episode from your tracked
-// shows — recent past through upcoming — grouped by day with a Today anchor.
+// shows, grouped by day and anchored at Today.
+//
+// Loading is day-first: shows that cannot touch the visible window are never
+// fetched, cached data paints immediately, and the rest arrives
+// nearest-airing-first. Days render progressively outward from Today so a
+// large library never blocks the part you are looking at.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { IconCheck, IconRefresh } from '../components/Icons'
 import { PosterImg } from '../components/PosterImg'
 import { refreshShow } from '../lib/actions'
 import { addDays, fmtDayHeading, relTime, todayISO } from '../lib/dates'
 import { epCode, finaleLabel, premiereLabel } from '../lib/episodes'
-import { pooled } from '../lib/pool'
-import { buildSchedule, showsWithoutDates } from '../lib/schedule'
+import { pooled, PRIORITY } from '../lib/pool'
+import { showsWithoutDates } from '../lib/schedule'
 import { toast } from '../lib/toast'
-import { useEpisodesMap } from '../lib/useEpisodes'
+import { useSchedule } from '../lib/useSchedule'
 import { useLibrary } from '../store/library'
 import { useSettings } from '../store/settings'
 import { USER_STATUS_LABELS, USER_STATUS_ORDER, type UserStatus } from '../types'
+
+/** Days rendered ahead of / behind Today before the reader asks for more. */
+const INITIAL_AFTER = 12
+const INITIAL_BEFORE = 3
+const STEP_AFTER = 14
+const STEP_BEFORE = 10
 
 export function SchedulePage() {
   const shows = useLibrary((s) => s.shows)
@@ -27,35 +38,73 @@ export function SchedulePage() {
   const [end, setEnd] = useState(() => addDays(todayISO(), 60))
   const [refreshing, setRefreshing] = useState(false)
 
-  const all = useMemo(() => Object.values(shows), [shows])
   const included = useMemo(
-    () => all.filter((s) => scheduleStatuses.includes(s.userStatus)),
-    [all, scheduleStatuses],
+    () => Object.values(shows).filter((s) => scheduleStatuses.includes(s.userStatus)),
+    [shows, scheduleStatuses],
   )
 
-  const { map, loading, errors, reload } = useEpisodesMap(included)
-
-  const groups = useMemo(
-    () => buildSchedule(included, map, start, end),
-    [included, map, start, end],
-  )
-  const noDates = useMemo(
-    () => showsWithoutDates(included, map, today),
-    [included, map, today],
+  const { days, epsByShow, pending, relevant, skipped, errors, reload } = useSchedule(
+    included,
+    start,
+    end,
+    today,
   )
 
-  // Scroll to today (or the first future day) once the list is ready.
+  // --- progressive day rendering -----------------------------------------
+  const anchorIndex = useMemo(() => {
+    const idx = days.findIndex((day) => day.date >= today)
+    return idx === -1 ? Math.max(0, days.length - 1) : idx
+  }, [days, today])
+
+  const [shownAfter, setShownAfter] = useState(INITIAL_AFTER)
+  const [shownBefore, setShownBefore] = useState(INITIAL_BEFORE)
+
+  // A new window means a fresh reading position.
+  useEffect(() => {
+    setShownAfter(INITIAL_AFTER)
+    setShownBefore(INITIAL_BEFORE)
+  }, [start, end])
+
+  const from = Math.max(0, anchorIndex - shownBefore)
+  const to = Math.min(days.length, anchorIndex + shownAfter)
+  const visibleDays = useMemo(() => days.slice(from, to), [days, from, to])
+  const hasMoreLoadedAfter = to < days.length
+  const hasMoreLoadedBefore = from > 0
+
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const extendForward = useCallback(() => {
+    if (hasMoreLoadedAfter) setShownAfter((n) => n + STEP_AFTER)
+    else setEnd((prev) => addDays(prev, 60))
+  }, [hasMoreLoadedAfter])
+
+  // Reveal more days as the reader approaches the end of the rendered list.
+  useEffect(() => {
+    const node = bottomRef.current
+    if (!node || pending > 0) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) extendForward()
+      },
+      { rootMargin: '400px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [extendForward, pending, visibleDays.length])
+
+  function loadEarlier() {
+    if (hasMoreLoadedBefore) setShownBefore((n) => n + STEP_BEFORE)
+    else setStart((prev) => addDays(prev, -30))
+  }
+
+  // --- today anchor ------------------------------------------------------
   const anchorRef = useRef<HTMLDivElement>(null)
   const didScrollRef = useRef(false)
-  const anchorDate = useMemo(
-    () => groups.find((g) => g.date >= today)?.date,
-    [groups, today],
-  )
+  const anchorDate = days[anchorIndex]?.date
   useEffect(() => {
-    if (didScrollRef.current || loading || !anchorDate) return
+    if (didScrollRef.current || !anchorDate) return
     didScrollRef.current = true
     anchorRef.current?.scrollIntoView({ block: 'start' })
-  }, [loading, anchorDate])
+  }, [anchorDate])
 
   function toggleStatus(status: UserStatus) {
     const next = scheduleStatuses.includes(status)
@@ -68,13 +117,18 @@ export function SchedulePage() {
     if (refreshing || !included.length) return
     setRefreshing(true)
     const results = await Promise.allSettled(
-      included.map((show) => pooled(() => refreshShow(show.id))),
+      included.map((show) => pooled(() => refreshShow(show.id), PRIORITY.interactive)),
     )
     setRefreshing(false)
     const failed = results.filter((r) => r.status === 'rejected').length
     toast(failed ? `Refreshed with ${failed} failure${failed > 1 ? 's' : ''}` : 'Schedule refreshed')
     reload()
   }
+
+  const noDates = useMemo(
+    () => showsWithoutDates(included, epsByShow, today),
+    [included, epsByShow, today],
+  )
 
   return (
     <div className="page">
@@ -108,7 +162,12 @@ export function SchedulePage() {
         </div>
       )}
 
-      {loading && <div className="hint">Loading episode lists…</div>}
+      {pending > 0 && (
+        <div className="hint sched-loading">
+          Loading {pending} more show{pending === 1 ? '' : 's'}…
+          {skipped > 0 && ` (skipped ${skipped} outside these dates)`}
+        </div>
+      )}
       {errors > 0 && (
         <div className="notice">
           Couldn't refresh {errors} show{errors > 1 ? 's' : ''} — showing cached data.
@@ -117,31 +176,36 @@ export function SchedulePage() {
 
       {included.length > 0 && (
         <div className="schedule">
-          <button className="btn btn-ghost load-more" onClick={() => setStart(addDays(start, -30))}>
-            ← Load earlier (from {fmtDayHeading(start, today)})
+          <button className="btn btn-ghost load-more" onClick={loadEarlier}>
+            ← Earlier episodes
           </button>
 
-          {groups.length === 0 && !loading && (
-            <div className="hint">Nothing airing between these dates.</div>
+          {days.length === 0 && pending === 0 && (
+            <div className="hint">
+              Nothing airing between these dates
+              {relevant === 0 && skipped > 0 ? ' — every tracked show finished earlier' : ''}.
+            </div>
           )}
 
-          {groups.map((group) => (
-            <div key={group.date} className="sched-day">
-              {group.date === anchorDate && <div ref={anchorRef} className="sched-anchor" />}
-              <div className={`sched-date ${group.date === today ? 'sched-today' : ''}`}>
-                {fmtDayHeading(group.date, today)}
+          {visibleDays.map((day) => (
+            <div key={day.date} className="sched-day">
+              {day.date === anchorDate && <div ref={anchorRef} className="sched-anchor" />}
+              <div className={`sched-date ${day.date === today ? 'sched-today' : ''}`}>
+                {fmtDayHeading(day.date, today)}
               </div>
-              {group.items.map(({ show, ep }) => {
+              {day.entries.map(({ showId, ep }) => {
+                const show = shows[showId]
+                if (!show) return null
                 const badge = premiereLabel(ep) ?? finaleLabel(ep)
-                const aired = group.date <= today
+                const aired = day.date <= today
                 const isWatched = show.watched[ep.id] !== undefined
                 return (
-                  <div key={`${show.id}-${ep.id}`} className="sched-row">
-                    <Link to={`/show/${show.id}`} className="sched-thumb">
+                  <div key={`${showId}-${ep.id}`} className="sched-row">
+                    <Link to={`/show/${showId}`} className="sched-thumb">
                       <PosterImg src={show.poster} alt={show.name} className="poster" />
                     </Link>
                     <div className="sched-info">
-                      <Link to={`/show/${show.id}`} className="sched-show">
+                      <Link to={`/show/${showId}`} className="sched-show">
                         {show.name}
                       </Link>
                       <div className="sched-ep">
@@ -151,7 +215,7 @@ export function SchedulePage() {
                       <div className="sched-meta">
                         {show.network && <span>{show.network}</span>}
                         {badge && <span className="chip chip-outline chip-tiny">{badge}</span>}
-                        {!aired && <span className="sched-rel">{relTime(group.date, today)}</span>}
+                        {!aired && <span className="sched-rel">{relTime(day.date, today)}</span>}
                       </div>
                     </div>
                     {aired && (
@@ -159,7 +223,7 @@ export function SchedulePage() {
                         className={`ep-check ${isWatched ? 'checked' : ''}`}
                         title={isWatched ? 'Mark unwatched' : 'Mark watched'}
                         aria-label={`${isWatched ? 'Unmark' : 'Mark'} ${show.name} ${epCode(ep)} watched`}
-                        onClick={() => setWatched(show.id, [ep.id], !isWatched)}
+                        onClick={() => setWatched(showId, [ep.id], !isWatched)}
                       >
                         <IconCheck size={16} />
                       </button>
@@ -170,8 +234,9 @@ export function SchedulePage() {
             </div>
           ))}
 
-          <button className="btn btn-ghost load-more" onClick={() => setEnd(addDays(end, 60))}>
-            Load later (to {fmtDayHeading(end, today)}) →
+          <div ref={bottomRef} />
+          <button className="btn btn-ghost load-more" onClick={extendForward}>
+            Later episodes →
           </button>
         </div>
       )}

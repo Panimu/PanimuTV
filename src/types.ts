@@ -47,6 +47,9 @@ export interface TrackedShow {
   genres: string[]
   overview?: string
   firstAired?: string
+  /** Air date of the most recent episode — lets the schedule skip fetching
+   *  finished shows whose run ended before the visible window. */
+  lastAired?: string
   nextAired?: string
   addedAt: number
   updatedAt: number
