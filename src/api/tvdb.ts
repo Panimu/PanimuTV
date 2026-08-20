@@ -8,7 +8,7 @@
 // Auth: a project API key is exchanged for a bearer token via POST /login.
 // The token is kept in localStorage for ~27 days and refreshed on 401.
 
-import { cacheGet, cachePeek, cacheSet } from './cache'
+import { cacheAge, cacheGet, cachePeek, cacheSet } from './cache'
 import type {
   Genre,
   RawEpisode,
@@ -260,6 +260,17 @@ export function peekEpisodes(id: number): Ep[] | null {
   return cachePeek<Ep[]>(`eps.${id}`)
 }
 
+/** Age in ms of a show's cached episode list, or null when not cached. */
+export function episodesCacheAge(id: number): number | null {
+  return cacheAge(`eps.${id}`)
+}
+
+/** True when cached episodes exist but have outlived their status-based TTL. */
+export function episodesAreStale(id: number, airStatus?: string): boolean {
+  const age = episodesCacheAge(id)
+  return age !== null && age > episodeTtl(airStatus)
+}
+
 function toEp(raw: RawEpisode): Ep {
   const overview = raw.overview
     ? raw.overview.length > 260
@@ -279,6 +290,10 @@ function toEp(raw: RawEpisode): Ep {
   }
 }
 
+const MAX_EPISODE_PAGES = 50
+/** Pages requested at once after page 0 — outside the shared pool. */
+const EPISODE_PAGE_BURST = 3
+
 const episodesInFlight = new Map<number, Promise<Ep[]>>()
 
 /** Fetch the full aired-order episode list for a series (cached with TTL). */
@@ -292,14 +307,42 @@ export async function fetchEpisodes(id: number, airStatus?: string, force = fals
   if (running) return running
 
   const promise = (async () => {
-    const out: Ep[] = []
-    for (let page = 0; page < 50; page++) {
-      const env = await apiGet<{ episodes?: RawEpisode[] }>(`/series/${id}/episodes/default`, {
+    const getPage = (page: number) =>
+      apiGet<{ episodes?: RawEpisode[] }>(`/series/${id}/episodes/default`, {
         page: String(page),
       })
-      for (const raw of env.data?.episodes ?? []) out.push(toEp(raw))
-      if (!env.links?.next) break
+
+    const first = await getPage(0)
+    const out: Ep[] = (first.data?.episodes ?? []).map(toEp)
+
+    // The API reports the total up front, so the remaining pages can be
+    // fetched together instead of walked one round-trip at a time. A show's
+    // in-window episodes usually sit on the LAST page, which serial paging
+    // reaches last. Deliberately NOT pooled(): this runs inside a pooled slot.
+    const total = first.links?.total_items
+    const size = first.links?.page_size
+    const pageCount =
+      total && size && size > 0 ? Math.min(MAX_EPISODE_PAGES, Math.ceil(total / size)) : null
+
+    if (pageCount !== null) {
+      for (let from = 1; from < pageCount; from += EPISODE_PAGE_BURST) {
+        const batch = []
+        for (let page = from; page < Math.min(from + EPISODE_PAGE_BURST, pageCount); page++) {
+          batch.push(getPage(page))
+        }
+        for (const env of await Promise.all(batch)) {
+          for (const raw of env.data?.episodes ?? []) out.push(toEp(raw))
+        }
+      }
+    } else if (first.links?.next) {
+      // Older/odd responses without a total: fall back to the serial walk.
+      for (let page = 1; page < MAX_EPISODE_PAGES; page++) {
+        const env = await getPage(page)
+        for (const raw of env.data?.episodes ?? []) out.push(toEp(raw))
+        if (!env.links?.next) break
+      }
     }
+
     out.sort((a, b) => a.s - b.s || a.e - b.e)
     cacheSet(key, out)
     return out

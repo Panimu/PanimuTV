@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchEpisodes } from '../api/tvdb'
-import { pooled } from './pool'
+import { pooled, PRIORITY } from './pool'
 import type { Ep, TrackedShow } from '../types'
 
 export function useEpisodes(showId: number | undefined, airStatus?: string) {
@@ -74,7 +74,9 @@ export function useEpisodesMap(shows: TrackedShow[]): EpisodesMap {
     setPending(shows.length)
     setErrors(0)
     for (const show of shows) {
-      pooled(() => fetchEpisodes(show.id, show.airStatus))
+      // Background priority: this is a whole-library sweep, and it must never
+      // queue ahead of the schedule's day-targeted fetches.
+      pooled(() => fetchEpisodes(show.id, show.airStatus), PRIORITY.background)
         .then((eps) => {
           if (alive) setMap((m) => ({ ...m, [show.id]: eps }))
         })

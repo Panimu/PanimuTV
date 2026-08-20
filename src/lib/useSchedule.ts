@@ -10,7 +10,7 @@
 //      so a large library cannot cause a rebuild storm.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchEpisodes, peekEpisodes } from '../api/tvdb'
+import { episodesAreStale, fetchEpisodes, peekEpisodes } from '../api/tvdb'
 import { pooled, PRIORITY } from './pool'
 import { indexShow, toDays, type DayIndex, type ScheduleDay } from './schedule'
 import { planWindow, windowPriority } from './scheduleWindow'
@@ -94,12 +94,16 @@ export function useSchedule(
     setCounts({ relevant: relevant.length, skipped: skipped.length })
 
     // 1. Synchronous pass: everything already in localStorage renders now.
+    // Cached-but-stale shows still paint immediately, then quietly revalidate —
+    // otherwise painting from cache would mean never refreshing at all.
     const needsFetch: TrackedShow[] = []
+    const revalidate: TrackedShow[] = []
     for (const show of relevant) {
       const cached = peekEpisodes(show.id)
       if (cached) {
         epsRef.current[show.id] = cached
         indexShow(index, show.id, cached, start, end)
+        if (episodesAreStale(show.id, show.airStatus)) revalidate.push(show)
       } else {
         needsFetch.push(show)
       }
@@ -108,8 +112,24 @@ export function useSchedule(
     setEpsByShow({ ...epsRef.current })
     setLoading(false)
 
+    const startRevalidation = () => {
+      for (const show of revalidate) {
+        pooled(() => fetchEpisodes(show.id, show.airStatus, true), PRIORITY.background)
+          .then((eps) => {
+            if (!alive) return
+            epsRef.current[show.id] = eps
+            indexShow(indexRef.current, show.id, eps, start, end)
+            scheduleFlush()
+          })
+          .catch(() => {
+            /* the cached copy stays on screen */
+          })
+      }
+    }
+
     if (!needsFetch.length) {
       setPending(0)
+      startRevalidation()
       return () => {
         alive = false
       }
@@ -134,6 +154,7 @@ export function useSchedule(
           if (alive) setPending((p) => p - 1)
         })
     }
+    startRevalidation()
 
     return () => {
       alive = false

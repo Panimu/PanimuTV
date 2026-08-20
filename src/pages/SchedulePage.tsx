@@ -27,6 +27,10 @@ const INITIAL_BEFORE = 3
 const STEP_AFTER = 14
 const STEP_BEFORE = 10
 
+/** Widening the date window weakens the skip test, so cap how far it can go. */
+const MAX_PAST_DAYS = 730
+const MAX_FUTURE_DAYS = 730
+
 export function SchedulePage() {
   const shows = useLibrary((s) => s.shows)
   const setWatched = useLibrary((s) => s.setWatched)
@@ -43,7 +47,7 @@ export function SchedulePage() {
     [shows, scheduleStatuses],
   )
 
-  const { days, epsByShow, pending, relevant, skipped, errors, reload } = useSchedule(
+  const { days, epsByShow, pending, relevant, skipped, loading, errors, reload } = useSchedule(
     included,
     start,
     end,
@@ -59,50 +63,76 @@ export function SchedulePage() {
   const [shownAfter, setShownAfter] = useState(INITIAL_AFTER)
   const [shownBefore, setShownBefore] = useState(INITIAL_BEFORE)
 
-  // A new window means a fresh reading position.
-  useEffect(() => {
-    setShownAfter(INITIAL_AFTER)
-    setShownBefore(INITIAL_BEFORE)
-  }, [start, end])
-
   const from = Math.max(0, anchorIndex - shownBefore)
   const to = Math.min(days.length, anchorIndex + shownAfter)
   const visibleDays = useMemo(() => days.slice(from, to), [days, from, to])
   const hasMoreLoadedAfter = to < days.length
   const hasMoreLoadedBefore = from > 0
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const maxEnd = useMemo(() => addDays(today, MAX_FUTURE_DAYS), [today])
+  const minStart = useMemo(() => addDays(today, -MAX_PAST_DAYS), [today])
+  const canWidenEnd = end < maxEnd
+  const canWidenStart = start > minStart
+
+  // Reveal already-loaded days first; only widen the fetch window once the
+  // reader has actually reached the end of what is loaded.
   const extendForward = useCallback(() => {
-    if (hasMoreLoadedAfter) setShownAfter((n) => n + STEP_AFTER)
-    else setEnd((prev) => addDays(prev, 60))
-  }, [hasMoreLoadedAfter])
+    if (hasMoreLoadedAfter) {
+      setShownAfter((n) => n + STEP_AFTER)
+    } else if (canWidenEnd) {
+      setEnd((prev) => (prev < maxEnd ? addDays(prev, 60) : prev))
+      setShownAfter((n) => n + STEP_AFTER)
+    }
+  }, [hasMoreLoadedAfter, canWidenEnd, maxEnd])
+
+  const loadEarlier = useCallback(() => {
+    if (hasMoreLoadedBefore) {
+      setShownBefore((n) => n + STEP_BEFORE)
+    } else if (canWidenStart) {
+      setStart((prev) => (prev > minStart ? addDays(prev, -30) : prev))
+      setShownBefore((n) => n + STEP_BEFORE)
+    }
+  }, [hasMoreLoadedBefore, canWidenStart, minStart])
 
   // Reveal more days as the reader approaches the end of the rendered list.
+  // Only ever grows the RENDER window: with an empty list the sentinel is
+  // trivially on screen, and letting it widen the fetch window there caused
+  // spurious full reloads on mount.
+  const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const node = bottomRef.current
-    if (!node || pending > 0) return
+    if (!node || !hasMoreLoadedAfter) return
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) extendForward()
+        if (entries.some((e) => e.isIntersecting)) setShownAfter((n) => n + STEP_AFTER)
       },
       { rootMargin: '400px' },
     )
     observer.observe(node)
     return () => observer.disconnect()
-  }, [extendForward, pending, visibleDays.length])
-
-  function loadEarlier() {
-    if (hasMoreLoadedBefore) setShownBefore((n) => n + STEP_BEFORE)
-    else setStart((prev) => addDays(prev, -30))
-  }
+  }, [hasMoreLoadedAfter, visibleDays.length])
 
   // --- today anchor ------------------------------------------------------
   const anchorRef = useRef<HTMLDivElement>(null)
-  const didScrollRef = useRef(false)
+  const userScrolledRef = useRef(false)
   const anchorDate = days[anchorIndex]?.date
+
   useEffect(() => {
-    if (didScrollRef.current || !anchorDate) return
-    didScrollRef.current = true
+    const onScroll = () => {
+      userScrolledRef.current = true
+    }
+    window.addEventListener('wheel', onScroll, { passive: true })
+    window.addEventListener('touchmove', onScroll, { passive: true })
+    window.addEventListener('keydown', onScroll)
+    return () => {
+      window.removeEventListener('wheel', onScroll)
+      window.removeEventListener('touchmove', onScroll)
+      window.removeEventListener('keydown', onScroll)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (userScrolledRef.current || !anchorDate) return
     anchorRef.current?.scrollIntoView({ block: 'start' })
   }, [anchorDate])
 
@@ -176,11 +206,13 @@ export function SchedulePage() {
 
       {included.length > 0 && (
         <div className="schedule">
-          <button className="btn btn-ghost load-more" onClick={loadEarlier}>
-            ← Earlier episodes
-          </button>
+          {(hasMoreLoadedBefore || canWidenStart) && (
+            <button className="btn btn-ghost load-more" onClick={loadEarlier}>
+              ← Earlier episodes
+            </button>
+          )}
 
-          {days.length === 0 && pending === 0 && (
+          {days.length === 0 && pending === 0 && !loading && (
             <div className="hint">
               Nothing airing between these dates
               {relevant === 0 && skipped > 0 ? ' — every tracked show finished earlier' : ''}.
@@ -234,10 +266,12 @@ export function SchedulePage() {
             </div>
           ))}
 
-          <div ref={bottomRef} />
-          <button className="btn btn-ghost load-more" onClick={extendForward}>
-            Later episodes →
-          </button>
+          {days.length > 0 && <div ref={bottomRef} />}
+          {(hasMoreLoadedAfter || canWidenEnd) && (
+            <button className="btn btn-ghost load-more" onClick={extendForward}>
+              Later episodes →
+            </button>
+          )}
         </div>
       )}
 

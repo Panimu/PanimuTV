@@ -34,6 +34,12 @@ export function cacheGet<T>(key: string, maxAgeMs: number): T | null {
   return entry.v
 }
 
+/** Age of a cache entry in ms, or null when absent. */
+export function cacheAge(key: string): number | null {
+  const entry = read<unknown>(key)
+  return entry ? Date.now() - entry.t : null
+}
+
 export function cacheSet<T>(key: string, value: T): void {
   const raw = JSON.stringify({ t: Date.now(), v: value } satisfies Entry<T>)
   try {
