@@ -534,6 +534,20 @@ img.poster,
   padding: 12px 14px;
 }
 
+.upnext-stale {
+  opacity: 0.7;
+}
+
+.next-mode-row {
+  margin: 0;
+}
+
+.chip-stale {
+  background: transparent;
+  color: var(--faint);
+  border-color: var(--border);
+}
+
 .upnext-poster {
   flex: 0 0 58px;
 }

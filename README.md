@@ -24,6 +24,12 @@ Built with Vite + React + TypeScript. Dark, poster-forward UI.
 **Watch Next (home)**
 - The next unwatched aired episode for every show you're watching, sorted by
   your recent activity, with a one-tap ✓ that advances to the next episode.
+- Defaults to **Likely** mode, which hides "stale" shows — ones with a new
+  episode in the last 50 days that haven't had anything watched in that same
+  window. A show on hiatus (no recent episode) is never stale, no matter how
+  long ago you watched it. Switch to **All** to see everything, including a
+  "Stale" badge on the hidden ones. (This threshold is deliberately isolated
+  in `src/lib/staleness.ts` since the definition is expected to evolve.)
 - "Coming up this week" strip across all tracked shows.
 
 **Schedule — scrollable release list**
